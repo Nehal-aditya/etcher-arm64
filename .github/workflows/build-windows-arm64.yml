@@ -30,9 +30,8 @@ jobs:
       - name: Configure npm for ARM64 native builds
         shell: pwsh
         run: |
-          npm config set msvc_version 2022
-          # This env var is read by node-gyp during `npm ci`
-          # We set it here so it persists into child processes
+          # Use GITHUB_ENV to pass variables natively across steps and child processes
+          echo "GYP_MSVS_VERSION=2022" >> $env:GITHUB_ENV
           echo "npm_config_arch=arm64" >> $env:GITHUB_ENV
           echo "npm_config_target_arch=arm64" >> $env:GITHUB_ENV
 
@@ -42,8 +41,9 @@ jobs:
         # so forge.config.ts skips the DigiCert signWithParams block
         env:
           NODE_ENV: development
-          npm_config_arch: arm64
-        run: npm ci
+        run: |
+          # Passing options via runtime flag bypasses strict npm validation checks
+          npm ci --msvs_version=2022
 
       # NOTE: rebuildConfig.onlyModules=[] in forge.config.ts means Forge
       # intentionally skips @electron/rebuild for the Electron process.

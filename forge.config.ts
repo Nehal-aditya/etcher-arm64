@@ -57,7 +57,7 @@ const config: ForgeConfig = {
 		onlyModules: [], // prevent rebuilding *any* native modules as they won't be used by electron but by the sidecar
 	},
 	makers: [
-		new MakerZIP(),
+		new MakerZIP({}, ['win32', 'darwin', 'linux']),
 		new MakerSquirrel({
 			setupIcon: 'assets/icon.ico',
 			loadingGif: 'assets/icon.png',

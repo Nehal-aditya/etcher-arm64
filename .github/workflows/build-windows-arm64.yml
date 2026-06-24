@@ -1,0 +1,110 @@
+name: Build Windows ARM64
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build-windows-arm64:
+    runs-on: windows-11-arm
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # node-gyp needs to target arm64 MSVC toolchain.
+      # winusb-driver-generator and drivelist both need this.
+      - name: Configure npm for ARM64 native builds
+        shell: pwsh
+        run: |
+          npm config set msvs_version 2022
+          # This env var is read by node-gyp during `npm ci`
+          # We set it here so it persists into child processes
+          echo "npm_config_arch=arm64" >> $env:GITHUB_ENV
+          echo "npm_config_target_arch=arm64" >> $env:GITHUB_ENV
+
+      - name: Install dependencies
+        shell: pwsh
+        # NODE_ENV must NOT be 'production' — keeps winSigningConfig empty
+        # so forge.config.ts skips the DigiCert signWithParams block
+        env:
+          NODE_ENV: development
+          npm_config_arch: arm64
+        run: npm ci
+
+      # NOTE: rebuildConfig.onlyModules=[] in forge.config.ts means Forge
+      # intentionally skips @electron/rebuild for the Electron process.
+      # Native modules live in the sidecar (etcher-util), compiled by yao-pkg.
+      # So we do NOT run @electron/rebuild here — it would be a no-op anyway.
+
+      - name: Verify MSVC ARM64 toolchain is available
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          Write-Host "VS install path: $vsPath"
+          # Verify arm64 cl.exe exists
+          $clArm = Get-ChildItem -Path $vsPath -Recurse -Filter "cl.exe" |
+            Where-Object { $_.FullName -match "arm64" } |
+            Select-Object -First 1
+          if ($clArm) {
+            Write-Host "ARM64 cl.exe found: $($clArm.FullName)"
+          } else {
+            Write-Error "ARM64 cl.exe NOT found — build will likely fail on native modules"
+            exit 1
+          }
+
+      - name: Build and package (electron-forge make)
+        shell: pwsh
+        env:
+          NODE_ENV: development        # keeps signing disabled
+          npm_config_arch: arm64       # yao-pkg sidecar picks up arch from here
+        run: |
+          # --arch arm64 tells Forge: package Electron arm64, pass arch=arm64
+          # to SidecarPlugin which feeds it to `yao-pkg --target node20-win-arm64`
+          npx electron-forge make --arch arm64 --platform win32
+
+      - name: List build outputs
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse out/make | Select-Object FullName
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: balena-etcher-win-arm64-zip
+          path: out/make/zip/win32/arm64/*.zip
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload Squirrel installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: balena-etcher-win-arm64-squirrel
+          path: out/make/squirrel.windows/arm64/
+          retention-days: 30
+          if-no-files-found: warn
+
+      # Attach to a GitHub Release when triggered by `release: created`
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/make/zip/win32/arm64/*.zip
+            out/make/squirrel.windows/arm64/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

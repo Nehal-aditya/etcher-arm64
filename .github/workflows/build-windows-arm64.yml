@@ -30,7 +30,7 @@ jobs:
       - name: Configure npm for ARM64 native builds
         shell: pwsh
         run: |
-          npm config set msvs_version 2022
+          npm config set msvc_version 2022
           # This env var is read by node-gyp during `npm ci`
           # We set it here so it persists into child processes
           echo "npm_config_arch=arm64" >> $env:GITHUB_ENV
